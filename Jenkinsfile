@@ -56,75 +56,78 @@
 
 
 // Jenkinsfile (Declarative Pipeline)
+
+
+// Jenkinsfile (Declarative Pipeline)
 pipeline {
-    // We use agent any because the Docker build commands will run on the host 
-    // machine using the mounted Docker socket.
+    // Master node runs the initial stages (Clone, Test)
     agent any 
 
-    // Define environment variables for consistency
+    // Define environment variables
     environment {
-        // REPLACE yourusername/appname with your actual Docker Hub details
-        DOCKER_IMAGE = 'yourusername/appname' 
+        // !! IMPORTANT: REPLACE with your actual Docker Hub details
+        DOCKER_IMAGE = 'halagul/ci-cd-pipeline-demo' 
         DOCKER_TAG = 'latest'
         APP_PORT = 5000 // Internal container port exposed in Dockerfile
-        HOST_PORT = 8083 // Host port to map the app to (same as Jenkins for convenience, or 5000)
+        HOST_PORT = 5000 // Host port to map the app to (Use 5000 to avoid conflict with Jenkins on 8083)
         CONTAINER_NAME = 'ci-cd-assignment-app'
     }
 
     stages {
-        // --- Stage 1: Clone Repository ---
+        // Stage 1, 2, 3 run on the Jenkins master node
         stage('1. Clone Repository') {
             steps {
-                // This step automatically pulls the code from GitHub based on the SCM settings
                 checkout scm 
                 echo "Repository successfully cloned."
             }
         }
-
-        // --- Stage 2: Install Dependencies ---
         stage('2. Install Dependencies') {
             steps {
-                // Note: Dependencies are usually installed during the Docker build (Stage 4).
-                // This stage is included to meet the assignment requirement.
-                // For a Docker pipeline, we often acknowledge that the Dockerfile handles this.
-                sh 'echo "Dependencies will be installed within the Docker build process."'
-                // If you had a Java project, this would be 'sh "mvn install"'
+                sh 'echo "Dependencies handled by Dockerfile. Skipping host install."'
             }
         }
-
-        // --- Stage 3: Run Tests ---
         stage('3. Run Tests') {
             steps {
-                // This assumes pytest is installed on the Jenkins worker or is run inside a temporary container
                 sh 'echo "Running tests from /tests folder..."'
-                // Example test execution command for Python:
-                // sh 'pip install pytest && pytest tests/' 
+                // Add actual test command here if needed: sh 'pytest tests/'
                 sh 'echo "Tests completed successfully (or skipped for simplicity)."'
             }
         }
 
-        // --- Stage 4: Build Docker Image ---
+        // --- STAGE 4: BUILD DOCKER IMAGE ---
+        // This stage runs inside a 'docker:dind' container to access the 'docker' command.
         stage('4. Build Docker Image') {
+            agent { 
+                docker {
+                    image 'docker:dind' // Uses a container with the Docker client
+                }
+            }
             steps {
-                // The 'sh' step executes 'docker build' using the host's Docker daemon
+                // The 'sh' command now successfully finds the 'docker' binary
                 sh "docker build -t ${env.DOCKER_IMAGE}:${env.DOCKER_TAG} ."
                 echo "Docker image ${env.DOCKER_IMAGE}:${env.DOCKER_TAG} built successfully."
             }
         }
 
-        // --- Stage 5: Run Docker Container (Local Deployment) ---
+        // --- STAGE 5: DEPLOY CONTAINER ---
+        // This stage also runs inside the 'docker:dind' container to run 'docker run'.
         stage('5. Run Docker Container (Deploy)') {
+            agent { 
+                docker {
+                    image 'docker:dind' 
+                }
+            }
             steps {
-                // Stop and remove any existing container instance
+                // Stop and remove existing container
                 sh "docker stop ${env.CONTAINER_NAME} || true" 
                 sh "docker rm ${env.CONTAINER_NAME} || true"
 
-                // Start the new container
+                // Start the new container, mapping 5000 (Host) to 5000 (App)
                 sh "docker run -d --name ${env.CONTAINER_NAME} -p ${env.HOST_PORT}:${env.APP_PORT} ${env.DOCKER_IMAGE}:${env.DOCKER_TAG}"
                 
-                // Verify the container is running and accessible
+                // Verify the container started
                 sh "docker ps | grep ${env.CONTAINER_NAME}"
-                echo "Application deployed on port ${env.HOST_PORT}."
+                echo "Application deployed on host port ${env.HOST_PORT}."
             }
         }
     }
