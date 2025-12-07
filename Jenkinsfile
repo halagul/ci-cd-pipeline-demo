@@ -57,77 +57,85 @@
 
 // Jenkinsfile (Declarative Pipeline)
 
-
 // Jenkinsfile (Declarative Pipeline)
+
 pipeline {
-    // Master node runs the initial stages (Clone, Test)
+    // The initial stage (Cloning) runs on the Jenkins master node.
     agent any 
 
-    // Define environment variables
+    // Define environment variables for consistency
     environment {
-        // !! IMPORTANT: REPLACE with your actual Docker Hub details
+        // !! IMPORTANT: REPLACE with your actual Docker Hub username and repository name
         DOCKER_IMAGE = 'halagul/ci-cd-pipeline-demo' 
         DOCKER_TAG = 'latest'
-        APP_PORT = 5000 // Internal container port exposed in Dockerfile
-        HOST_PORT = 5000 // Host port to map the app to (Use 5000 to avoid conflict with Jenkins on 8083)
+        
+        // Define ports and container name
+        APP_PORT = 5000 // Internal container port (as defined in your Dockerfile)
+        HOST_PORT = 5000 // Host port to map the app to (Using 5000 to avoid conflict with Jenkins on 8083)
         CONTAINER_NAME = 'ci-cd-assignment-app'
     }
 
     stages {
-        // Stage 1, 2, 3 run on the Jenkins master node
+        // --- Stage 1: Clone Repository ---
         stage('1. Clone Repository') {
             steps {
+                // This step automatically pulls the code based on job configuration
                 checkout scm 
                 echo "Repository successfully cloned."
             }
         }
+
+        // --- Stage 2: Install Dependencies (Conceptual) ---
         stage('2. Install Dependencies') {
             steps {
-                sh 'echo "Dependencies handled by Dockerfile. Skipping host install."'
+                // Dependencies are typically installed during the Docker build process.
+                sh 'echo "Dependencies will be installed within the Docker build process."'
             }
         }
+
+        // --- Stage 3: Run Tests ---
         stage('3. Run Tests') {
             steps {
                 sh 'echo "Running tests from /tests folder..."'
-                // Add actual test command here if needed: sh 'pytest tests/'
+                // Insert your actual test execution command here (e.g., sh 'pytest tests/')
                 sh 'echo "Tests completed successfully (or skipped for simplicity)."'
             }
         }
 
-        // --- STAGE 4: BUILD DOCKER IMAGE ---
-        // This stage runs inside a 'docker:dind' container to access the 'docker' command.
+        // --- Stage 4: Build Docker Image (FIXED: Uses Docker Agent) ---
         stage('4. Build Docker Image') {
-            agent { 
-                docker {
-                    image 'docker:dind' // Uses a container with the Docker client
-                }
-            }
-            steps {
-                // The 'sh' command now successfully finds the 'docker' binary
-                sh "docker build -t ${env.DOCKER_IMAGE}:${env.DOCKER_TAG} ."
-                echo "Docker image ${env.DOCKER_IMAGE}:${env.DOCKER_TAG} built successfully."
-            }
-        }
-
-        // --- STAGE 5: DEPLOY CONTAINER ---
-        // This stage also runs inside the 'docker:dind' container to run 'docker run'.
-        stage('5. Run Docker Container (Deploy)') {
+            // FIX: This stage runs inside a 'docker:dind' container (sidecar) 
+            // which has the 'docker' client installed, resolving the 'docker: not found' error.
             agent { 
                 docker {
                     image 'docker:dind' 
                 }
             }
             steps {
-                // Stop and remove existing container
+                sh "docker build -t ${env.DOCKER_IMAGE}:${env.DOCKER_TAG} ."
+                echo "Docker image ${env.DOCKER_IMAGE}:${env.DOCKER_TAG} built successfully."
+            }
+        }
+
+        // --- Stage 5: Run Docker Container (Deploy) (FIXED: Uses Docker Agent) ---
+        stage('5. Run Docker Container (Deploy)') {
+            // The deployment step also needs the 'docker' client.
+            agent { 
+                docker {
+                    image 'docker:dind' 
+                }
+            }
+            steps {
+                // Stop and remove any existing container instance
                 sh "docker stop ${env.CONTAINER_NAME} || true" 
                 sh "docker rm ${env.CONTAINER_NAME} || true"
 
-                // Start the new container, mapping 5000 (Host) to 5000 (App)
+                // Start the new container, mapping the Host Port to the App Port
                 sh "docker run -d --name ${env.CONTAINER_NAME} -p ${env.HOST_PORT}:${env.APP_PORT} ${env.DOCKER_IMAGE}:${env.DOCKER_TAG}"
                 
                 // Verify the container started
                 sh "docker ps | grep ${env.CONTAINER_NAME}"
-                echo "Application deployed on host port ${env.HOST_PORT}."
+                echo "Application deployed and accessible on host port ${env.HOST_PORT} (http://localhost:5000)."
             }
         }
     }
